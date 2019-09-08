@@ -5,6 +5,8 @@ module HIE.Bios.Cradle (
     , loadCradle
     , loadImplicitCradle
     , defaultCradle
+    -- TODO remove this again
+    , yamlConfig
   ) where
 
 import System.Process
