@@ -8,6 +8,8 @@ module HIE.Bios.Ghc.Check (
 
 import DynFlags (dopt_set, DumpFlag(Opt_D_dump_splices))
 import GHC
+import qualified Outputable
+
 
 import HIE.Bios.Ghc.Api
 import HIE.Bios.Ghc.Logger
@@ -36,10 +38,11 @@ checkSyntax opt cradle files = withGhcT $ do
       _      -> "MultipleFiles"
       -}
 
-modGraph :: Cradle -> IO [FilePath]
-modGraph crdl = withGhcT $ do
-  initializeFlagsWithCradle "src/HIE/Bios.hs" crdl
+modGraph :: Cradle -> FilePath -> IO [FilePath]
+modGraph crdl fp = withGhcT $ do
+  initializeFlagsWithCradle fp crdl
   mg <- GHC.getModuleGraph
+  Outputable.pprTraceM "modGraph" (Outputable.ppr $ GHC.mgModSummaries mg)
   return $ mapMaybe (GHC.ml_hs_file . GHC.ms_location) (GHC.mgModSummaries mg)
 
 ----------------------------------------------------------------
