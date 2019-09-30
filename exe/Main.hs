@@ -69,6 +69,7 @@ main = flip E.catches handlers $ do
       "debug"   -> debugInfo opt cradle
       "root"    -> rootInfo opt cradle
       "version" -> return progVersion
+      "modGraph" -> unlines <$> modGraph cradle
       "flags"   -> do
         res <- forM remainingArgs $ \fp -> do
                 res <- getCompilerOptions fp cradle
