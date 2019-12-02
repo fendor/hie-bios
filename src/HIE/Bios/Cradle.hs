@@ -34,8 +34,9 @@ import Data.Conduit.Process
 import qualified Data.Conduit.Combinators as C
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Text as C
-import Data.Text (unpack)
-import           Data.Maybe                     ( maybeToList )
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import Data.Maybe (maybeToList)
 ----------------------------------------------------------------
 
 -- | Given root\/foo\/bar.hs, return root\/hie.yaml, or wherever the yaml file was found.
@@ -295,8 +296,9 @@ processCabalWrapperArgs args =
 -- generate a fake GHC that can be passed to cabal
 -- when run with --interactive, it will print out its
 -- command-line arguments and exit
-getCabalWrapperTool :: IO FilePath
-getCabalWrapperTool = do
+getCabalWrapperTool :: IO FilePath -> IO FilePath
+getCabalWrapperTool ghcPathAction = do
+  ghcPath <- ghcPathAction
   wrapper_fp <-
     if isWindows
       then do
@@ -307,13 +309,13 @@ getCabalWrapperTool = do
         unless exists $ do
             tempDir <- getTemporaryDirectory
             let wrapper_hs = tempDir </> wrapper_name <.> "hs"
-            writeFile wrapper_hs cabalWrapperHs
+            T.writeFile wrapper_hs (cabalWrapperHs ghcPath)
             createDirectoryIfMissing True cacheDir
-            let ghc = (proc "ghc" ["-o", wrapper_fp, wrapper_hs])
+            let ghc = (proc ghcPath ["-o", wrapper_fp, wrapper_hs])
                         { cwd = Just (takeDirectory wrapper_hs) }
             readCreateProcess ghc "" >>= putStr
         return wrapper_fp
-      else writeSystemTempFile "bios-wrapper" cabalWrapper
+      else writeSystemTempFile "bios-wrapper" (T.unpack $ cabalWrapper ghcPath)
 
   setFileMode wrapper_fp accessModes
   _check <- readFile wrapper_fp
@@ -321,7 +323,7 @@ getCabalWrapperTool = do
 
 cabalAction :: FilePath -> Maybe String -> LoggingFunction -> FilePath -> IO (CradleLoadResult ComponentOptions)
 cabalAction work_dir mc l _fp = do
-  wrapper_fp <- getCabalWrapperTool
+  wrapper_fp <- getCabalWrapperTool (return "ghc")
   let cab_args = ["v2-repl", "--with-compiler", wrapper_fp]
                   ++ [component_name | Just component_name <- [mc]]
   (ex, output, stde, args) <-
@@ -377,7 +379,7 @@ stackCradleDependencies wdir = do
 stackAction :: FilePath -> Maybe String -> LoggingFunction -> FilePath -> IO (CradleLoadResult ComponentOptions)
 stackAction work_dir mc l _fp = do
   -- Same wrapper works as with cabal
-  wrapper_fp <- getCabalWrapperTool
+  wrapper_fp <- getCabalWrapperTool $ readCreateProcess  (readProcessInDirectory work_dir "stack" ["path", "--compiler-exe"]) ""
   (ex1, _stdo, stde, args) <-
       readProcessWithOutputFile l work_dir "stack" $ ["repl", "--no-nix-pure", "--no-load", "--with-ghc", wrapper_fp] ++ maybeToList mc
   (ex2, pkg_args, stdr, _) <-
@@ -523,15 +525,17 @@ readProcessWithOutputFile l work_dir fp args = withSystemTempFile "bios-output" 
   hSetBuffering h LineBuffering
   old_env <- getEnvironment
   -- Pipe stdout directly into the logger
-  let process = (proc fp args) { cwd = Just work_dir
-                               , env = Just (("HIE_BIOS_OUTPUT", output_file) : old_env)
-                               }
+  let process = (readProcessInDirectory work_dir fp args)
+                    { env = Just (("HIE_BIOS_OUTPUT", output_file) : old_env)
+                    }
       -- Windows line endings are not converted so you have to filter out `'r` characters
-      loggingConduit = (C.decodeUtf8  C..| C.lines C..| C.filterE (/= '\r')  C..| C.map unpack C..| C.iterM l C..| C.sinkList)
+      loggingConduit = (C.decodeUtf8  C..| C.lines C..| C.filterE (/= '\r')  C..| C.map T.unpack C..| C.iterM l C..| C.sinkList)
   (ex, stdo, stde) <- sourceProcessWithStreams process mempty loggingConduit loggingConduit
   !res <- force <$> hGetContents h
   return (ex, stdo, stde, lines (filter (/= '\r') res))
 
+readProcessInDirectory :: FilePath -> FilePath -> [String] -> CreateProcess
+readProcessInDirectory wdir p args = (proc p args) { cwd = Just wdir }
 
 makeCradleResult :: (ExitCode, [String], [String]) -> [FilePath] -> CradleLoadResult ComponentOptions
 makeCradleResult (ex, err, gopts) deps =
