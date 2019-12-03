@@ -35,8 +35,9 @@ import qualified Data.Conduit.Combinators as C
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Text as C
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import Data.Maybe (maybeToList)
+import           Data.Maybe                     ( maybeToList
+                                                , fromMaybe
+                                                )
 ----------------------------------------------------------------
 
 -- | Given root\/foo\/bar.hs, return root\/hie.yaml, or wherever the yaml file was found.
@@ -233,7 +234,7 @@ biosWorkDir = findFileUpwards (".hie-bios" ==)
 biosDepsAction :: LoggingFunction -> FilePath -> Maybe FilePath -> IO [FilePath]
 biosDepsAction l wdir (Just biosDepsProg) = do
   biosDeps' <- canonicalizePath biosDepsProg
-  (ex, sout, serr, args) <- readProcessWithOutputFile l wdir biosDeps' []
+  (ex, sout, serr, args) <- readProcessWithOutputFile l Nothing wdir biosDeps' []
   case ex of
     ExitFailure _ ->  error $ show (ex, sout, serr)
     ExitSuccess -> return args
@@ -247,7 +248,7 @@ biosAction :: FilePath
            -> IO (CradleLoadResult ComponentOptions)
 biosAction wdir bios bios_deps l fp = do
   bios' <- canonicalizePath bios
-  (ex, _stdo, std, res) <- readProcessWithOutputFile l wdir bios' [fp]
+  (ex, _stdo, std, res) <- readProcessWithOutputFile l Nothing wdir bios' [fp]
   deps <- biosDepsAction l wdir bios_deps
         -- Output from the program should be written to the output file and
         -- delimited by newlines.
@@ -309,13 +310,13 @@ getCabalWrapperTool ghcPathAction = do
         unless exists $ do
             tempDir <- getTemporaryDirectory
             let wrapper_hs = tempDir </> wrapper_name <.> "hs"
-            T.writeFile wrapper_hs (cabalWrapperHs ghcPath)
+            writeFile wrapper_hs cabalWrapperHs
             createDirectoryIfMissing True cacheDir
             let ghc = (proc ghcPath ["-o", wrapper_fp, wrapper_hs])
                         { cwd = Just (takeDirectory wrapper_hs) }
             readCreateProcess ghc "" >>= putStr
         return wrapper_fp
-      else writeSystemTempFile "bios-wrapper" (T.unpack $ cabalWrapper ghcPath)
+      else writeSystemTempFile "bios-wrapper" cabalWrapper
 
   setFileMode wrapper_fp accessModes
   _check <- readFile wrapper_fp
@@ -327,7 +328,7 @@ cabalAction work_dir mc l _fp = do
   let cab_args = ["v2-repl", "--with-compiler", wrapper_fp]
                   ++ [component_name | Just component_name <- [mc]]
   (ex, output, stde, args) <-
-    readProcessWithOutputFile l work_dir "cabal" cab_args
+    readProcessWithOutputFile l Nothing work_dir "cabal" cab_args
   deps <- cabalCradleDependencies work_dir
   case processCabalWrapperArgs args of
       Nothing -> pure $ CradleFail (CradleError ex
@@ -378,12 +379,16 @@ stackCradleDependencies wdir = do
 
 stackAction :: FilePath -> Maybe String -> LoggingFunction -> FilePath -> IO (CradleLoadResult ComponentOptions)
 stackAction work_dir mc l _fp = do
+  ghcPath <- readCreateProcess
+    (readProcessInDirectory work_dir "stack" ["path", "--compiler-exe"])
+    ""
   -- Same wrapper works as with cabal
-  wrapper_fp <- getCabalWrapperTool $ readCreateProcess  (readProcessInDirectory work_dir "stack" ["path", "--compiler-exe"]) ""
+  wrapper_fp <- getCabalWrapperTool (return ghcPath)
+
   (ex1, _stdo, stde, args) <-
-      readProcessWithOutputFile l work_dir "stack" $ ["repl", "--no-nix-pure", "--no-load", "--with-ghc", wrapper_fp] ++ maybeToList mc
+    readProcessWithOutputFile l (Just ghcPath) work_dir "stack" $ ["repl", "--no-nix-pure", "--no-load", "--with-ghc", wrapper_fp] ++ maybeToList mc
   (ex2, pkg_args, stdr, _) <-
-    readProcessWithOutputFile l work_dir "stack" ["path", "--ghc-package-path"]
+    readProcessWithOutputFile l Nothing work_dir "stack" ["path", "--ghc-package-path"]
   let split_pkgs = concatMap splitSearchPath pkg_args
       pkg_ghc_args = concatMap (\p -> ["-package-db", p] ) split_pkgs
   deps <- stackCradleDependencies work_dir
@@ -508,25 +513,29 @@ findFile p dir = do
     getFiles = filter p <$> getDirectoryContents dir
     doesPredFileExist file = doesFileExist $ dir </> file
 
--- | Call a process with the given arguments
+-- | Call a process with the given arguments.
 -- * A special file is created for the process to write to, the process can discover the name of
 -- the file by reading the @HIE_BIOS_OUTPUT@ environment variable. The contents of this file is
 -- returned by the function.
 -- * The logging function is called every time the process emits anything to stdout or stderr.
 -- it can be used to report progress of the process to a user.
--- * The process is executed in the given directory
+-- * The process is executed in the given directory.
+-- * The path to the GHC version to use is supplied in the environment variable @HIE_BIOS_GHC@.
 readProcessWithOutputFile
-  :: LoggingFunction
-  -> FilePath
-  -> FilePath
-  -> [String]
+  :: LoggingFunction -- ^ Output of the process is streamed into this function.
+  -> Maybe FilePath -- ^ Optional FilePath to GHC. Process can access this
+                    -- file from the enviornment variable @HIE_BIOS_GHC@.
+                    -- Defaults to "ghc".
+  -> FilePath -- ^ Working directory. Process is executed in this directory.
+  -> FilePath -- ^ Process to call.
+  -> [String] -- ^ Arguments to the process.
   -> IO (ExitCode, [String], [String], [String])
-readProcessWithOutputFile l work_dir fp args = withSystemTempFile "bios-output" $ \output_file h -> do
+readProcessWithOutputFile l ghcPath work_dir fp args = withSystemTempFile "bios-output" $ \output_file h -> do
   hSetBuffering h LineBuffering
   old_env <- getEnvironment
   -- Pipe stdout directly into the logger
   let process = (readProcessInDirectory work_dir fp args)
-                    { env = Just (("HIE_BIOS_OUTPUT", output_file) : old_env)
+                    { env = Just $ ("HIE_BIOS_GHC", fromMaybe "ghc" ghcPath) : ("HIE_BIOS_OUTPUT", output_file) : old_env
                     }
       -- Windows line endings are not converted so you have to filter out `'r` characters
       loggingConduit = (C.decodeUtf8  C..| C.lines C..| C.filterE (/= '\r')  C..| C.map T.unpack C..| C.iterM l C..| C.sinkList)
