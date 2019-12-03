@@ -386,19 +386,44 @@ stackAction work_dir mc l _fp = do
   wrapper_fp <- getCabalWrapperTool (return ghcPath)
 
   (ex1, _stdo, stde, args) <-
-    readProcessWithOutputFile l (Just ghcPath) work_dir "stack" $ ["repl", "--no-nix-pure", "--no-load", "--with-ghc", wrapper_fp] ++ maybeToList mc
+    readProcessWithOutputFile
+            l (Just ghcPath) work_dir
+            "stack" $ ["repl", "--no-nix-pure", "--with-ghc", wrapper_fp] ++ maybeToList mc
   (ex2, pkg_args, stdr, _) <-
     readProcessWithOutputFile l Nothing work_dir "stack" ["path", "--ghc-package-path"]
   let split_pkgs = concatMap splitSearchPath pkg_args
       pkg_ghc_args = concatMap (\p -> ["-package-db", p] ) split_pkgs
   deps <- stackCradleDependencies work_dir
-  return $ case processCabalWrapperArgs args of
-      Nothing -> CradleFail (CradleError ex1 $
+  case processCabalWrapperArgs args of
+      Nothing -> return $ CradleFail (CradleError ex1 $
                   ("Failed to parse result of calling cabal":
                     stde)
                    ++ args)
 
-      Just ghc_args -> makeCradleResult (combineExitCodes [ex1, ex2], stde ++ stdr, ghc_args ++ pkg_ghc_args) deps
+      Just ghc_args -> do
+        -- parse the .ghci file that contains all targets
+        -- a package declares.
+        let Just fp = findGhciScript ghc_args
+        targets <- getTargetsFromGhciScript fp
+        return $ makeCradleResult (combineExitCodes [ex1, ex2], stde ++ stdr, ghc_args ++ pkg_ghc_args ++ targets) deps
+
+findGhciScript :: [String] -> Maybe FilePath
+findGhciScript args
+    | Just option <- find (ghciScript `isPrefixOf`) args
+    , Just flag <- stripPrefix ghciScript option
+    = Just flag
+    | otherwise = Nothing
+    where
+      ghciScript = "-ghci-script="
+
+getTargetsFromGhciScript :: FilePath -> IO [String]
+getTargetsFromGhciScript script = do
+  contents <- lines <$> readFile script
+  return
+    $ concatMap (tail {- first element is ":add" which we want to remove -}
+                      . words)
+    $ filter (":add" `isPrefixOf`) contents
+
 
 combineExitCodes :: [ExitCode] -> ExitCode
 combineExitCodes = foldr go ExitSuccess
