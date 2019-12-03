@@ -1,5 +1,5 @@
 cradle:
-  cabal:
+  stack:
       - path: ./src
         component: "multi-stack:lib"
 
