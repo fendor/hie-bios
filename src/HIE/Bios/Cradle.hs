@@ -379,7 +379,7 @@ stackCradleDependencies wdir = do
 
 stackAction :: FilePath -> Maybe String -> LoggingFunction -> FilePath -> IO (CradleLoadResult ComponentOptions)
 stackAction work_dir mc l _fp = do
-  ghcPath <- readCreateProcess
+  ghcPath <- T.unpack . T.strip . T.pack <$> readCreateProcess
     (readProcessInDirectory work_dir "stack" ["path", "--compiler-exe"])
     ""
   -- Same wrapper works as with cabal
