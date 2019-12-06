@@ -87,9 +87,11 @@ initSessionWithMessage :: (GhcMonad m)
             -> m G.SuccessFlag
 initSessionWithMessage msg compOpts = do
     targets <- initSession compOpts
+    liftIO $ putStrLn $ "initSession with Targets"
     G.setTargets targets
     -- Get the module graph using the function `getModuleGraph`
     mod_graph <- G.depanal [] True
+    liftIO $ putStrLn $ "depanal: " ++ show (length $ G.mgModSummaries mod_graph)
     G.load' LoadAllTargets msg mod_graph
 
 ----------------------------------------------------------------
