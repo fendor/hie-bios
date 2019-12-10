@@ -10,40 +10,41 @@ import Control.Monad ( unless )
 import System.Directory
 import System.FilePath ( makeRelative )
 import BasicTypes
+import System.Log.Logger
 
 main :: IO ()
-main = defaultMain $
-  testGroup "Bios-tests"
-    [ testGroup "Find cradle"
-      [ testCaseSteps "simple-cabal"
-              (findCradleForModule
-                "./tests/projects/simple-cabal/B.hs"
-                (Just "./tests/projects/simple-cabal/hie.yaml")
-              )
+main = do
+  updateGlobalLogger "hie-bios" (setLevel DEBUG)
+  defaultMain $
+    testGroup "Bios-tests"
+      [ testGroup "Find cradle"
+        [ testCaseSteps "simple-cabal"
+                (findCradleForModule
+                  "./tests/projects/simple-cabal/B.hs"
+                  (Just "./tests/projects/simple-cabal/hie.yaml")
+                )
 
-      -- Checks if we can find a hie.yaml even when the given filepath
-      -- is unknown. This functionality is required by Haskell IDE Engine.
-      , testCaseSteps "simple-cabal-unknown-path"
-              (findCradleForModule
-                "./tests/projects/simple-cabal/Foo.hs"
-                (Just "./tests/projects/simple-cabal/hie.yaml")
-              )
-      ]
-    , testGroup "Loading tests" [
-      testCaseSteps "simple-cabal" $ testDirectory "./tests/projects/simple-cabal/B.hs"
-      -- The stack tests don't attempt to load the targets initially because they are not returned
-      -- by `stack repl`. They are hidden inside a GHCi script.
-      , testCaseSteps "simple-stack" $ testDirectory "./tests/projects/simple-stack/B.hs"
-      , testCaseSteps "simple-direct" $ testDirectory "./tests/projects/simple-direct/B.hs"
-      , testCaseSteps "simple-bios" $ testDirectory "./tests/projects/simple-bios/B.hs"
-      , testCaseSteps "multi-cabal" {- tests if both components can be loaded -}
-                    $  testDirectory "./tests/projects/multi-cabal/app/Main.hs"
-                    >> testDirectory "./tests/projects/multi-cabal/src/Lib.hs"
-      , testCaseSteps "multi-stack" {- tests if both components can be loaded -}
-                    $  testDirectory "./tests/projects/multi-stack/app/Main.hs"
-                    >> testDirectory "./tests/projects/multi-stack/src/Lib.hs"
-      ]
-  ]
+        -- Checks if we can find a hie.yaml even when the given filepath
+        -- is unknown. This functionality is required by Haskell IDE Engine.
+        , testCaseSteps "simple-cabal-unknown-path"
+                (findCradleForModule
+                  "./tests/projects/simple-cabal/Foo.hs"
+                  (Just "./tests/projects/simple-cabal/hie.yaml")
+                )
+        ]
+      , testGroup "Loading tests" [
+        testCaseSteps "simple-cabal" $ testDirectory "./tests/projects/simple-cabal/B.hs"
+        , testCaseSteps "simple-stack" $ testDirectory "./tests/projects/simple-stack/B.hs"
+        , testCaseSteps "simple-direct" $ testDirectory "./tests/projects/simple-direct/B.hs"
+        , testCaseSteps "simple-bios" $ testDirectory "./tests/projects/simple-bios/B.hs"
+        , testCaseSteps "multi-cabal" {- tests if both components can be loaded -}
+                      $  testDirectory "./tests/projects/multi-cabal/app/Main.hs"
+                      >> testDirectory "./tests/projects/multi-cabal/src/Lib.hs"
+        , testCaseSteps "multi-stack" {- tests if both components can be loaded -}
+                      $  testDirectory "./tests/projects/multi-stack/app/Main.hs"
+                      >> testDirectory "./tests/projects/multi-stack/src/Lib.hs"
+        ]
+    ]
 
 
 

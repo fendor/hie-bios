@@ -108,7 +108,8 @@ test-suite bios-tests
       hie-bios,
       filepath,
       directory,
-      ghc
+      ghc,
+      hslogger
 
   hs-source-dirs: tests/
   ghc-options: -threaded -Wall
