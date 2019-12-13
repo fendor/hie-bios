@@ -33,16 +33,16 @@ main = do
                 )
         ]
       , testGroup "Loading tests" [
-        testCaseSteps "simple-cabal" $ testDirectory "./tests/projects/simple-cabal/B.hs"
-        , testCaseSteps "simple-stack" $ testDirectory "./tests/projects/simple-stack/B.hs"
-        , testCaseSteps "simple-direct" $ testDirectory "./tests/projects/simple-direct/B.hs"
-        , testCaseSteps "simple-bios" $ testDirectory "./tests/projects/simple-bios/B.hs"
-        , testCaseSteps "multi-cabal" {- tests if both components can be loaded -}
-                      $  testDirectory "./tests/projects/multi-cabal/app/Main.hs"
-                      >> testDirectory "./tests/projects/multi-cabal/src/Lib.hs"
-        , testCaseSteps "multi-stack" {- tests if both components can be loaded -}
-                      $  testDirectory "./tests/projects/multi-stack/app/Main.hs"
-                      >> testDirectory "./tests/projects/multi-stack/src/Lib.hs"
+        -- testCaseSteps "simple-cabal" $ testDirectory "./tests/projects/simple-cabal/B.hs"
+        testCaseSteps "simple-stack" $ testDirectory "./tests/projects/simple-stack/B.hs"
+        -- , testCaseSteps "simple-direct" $ testDirectory "./tests/projects/simple-direct/B.hs"
+        -- , testCaseSteps "simple-bios" $ testDirectory "./tests/projects/simple-bios/B.hs"
+        -- , testCaseSteps "multi-cabal" {- tests if both components can be loaded -}
+        --               $  testDirectory "./tests/projects/multi-cabal/app/Main.hs"
+        --               >> testDirectory "./tests/projects/multi-cabal/src/Lib.hs"
+        -- , testCaseSteps "multi-stack" {- tests if both components can be loaded -}
+        --               $  testDirectory "./tests/projects/multi-stack/app/Main.hs"
+        --               >> testDirectory "./tests/projects/multi-stack/src/Lib.hs"
         ]
     ]
 
