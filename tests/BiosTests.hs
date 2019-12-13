@@ -10,6 +10,7 @@ import Control.Monad ( unless )
 import System.Directory
 import System.FilePath ( makeRelative )
 import BasicTypes
+import HIE.Bios.Ghc.Check
 import System.Log.Logger
 
 main :: IO ()
@@ -35,6 +36,8 @@ main = do
       , testGroup "Loading tests" [
         -- testCaseSteps "simple-cabal" $ testDirectory "./tests/projects/simple-cabal/B.hs"
         testCaseSteps "simple-stack" $ testDirectory "./tests/projects/simple-stack/B.hs"
+        ,
+        testCaseSteps "simple-stack-2" $ testDirectory2 "./tests/projects/simple-stack/B.hs"
         -- , testCaseSteps "simple-direct" $ testDirectory "./tests/projects/simple-direct/B.hs"
         -- , testCaseSteps "simple-bios" $ testDirectory "./tests/projects/simple-bios/B.hs"
         -- , testCaseSteps "multi-cabal" {- tests if both components can be loaded -}
@@ -47,6 +50,22 @@ main = do
     ]
 
 
+testDirectory2 :: FilePath -> (String -> IO ()) -> IO ()
+testDirectory2 fp step = do
+  a_fp <- canonicalizePath fp
+  step "Finding Cradle"
+  mcfg <- findCradle a_fp
+  step "Loading Cradle"
+  crd <- case mcfg of
+          Just cfg -> loadCradle cfg
+          Nothing -> loadImplicitCradle a_fp
+  step $ "Found cradle: " ++ show crd
+  step "Initialise Flags"
+  r <- checkSyntax crd [fp]
+  step $ "Result: " ++ r
+  return ()
+
+
 
 testDirectory :: FilePath -> (String -> IO ()) -> IO ()
 testDirectory fp step = do
@@ -57,10 +76,12 @@ testDirectory fp step = do
   crd <- case mcfg of
           Just cfg -> loadCradle cfg
           Nothing -> loadImplicitCradle a_fp
+  step $ "Found cradle: " ++ show crd
   step "Initialise Flags"
   withCurrentDirectory (cradleRootDir crd) $
     withGHC' $ do
       let relFp = makeRelative (cradleRootDir crd) a_fp
+      liftIO $ step $ "relative filePath: " ++ relFp
       res <- initializeFlagsWithCradleWithMessage (Just (\_ n _ _ -> step (show n))) relFp crd
       case res of
         CradleSuccess ini -> do
