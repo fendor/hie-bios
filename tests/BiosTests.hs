@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Main where
 
 import Test.Tasty
@@ -6,9 +7,10 @@ import HIE.Bios
 import HIE.Bios.Ghc.Api
 import HIE.Bios.Ghc.Load
 import Control.Monad.IO.Class
-import Control.Monad ( unless )
+import Control.Monad  ( unless, forM_)
 import System.Directory
 import System.FilePath ( makeRelative )
+import System.FilePath ( (</>) )
 import BasicTypes
 import HIE.Bios.Ghc.Check
 import System.Log.Logger
@@ -106,3 +108,30 @@ findCradleForModule fp expected' step = do
     ++ show expected
     ++ ", Actual: "
     ++ show mcfg
+
+writeStackYamlFiles :: IO ()
+writeStackYamlFiles = do
+  let yamlFile = stackYaml stackYamlResolver
+  forM_ stackProjects $ \proj ->
+    writeFile (proj </> "stack.yaml") yamlFile
+
+stackProjects :: [FilePath]
+stackProjects =
+  [ "tests" </> "projects" </> "multi-stack"
+  , "tests" </> "projects" </> "simple-stack"
+  ]
+
+stackYaml :: String -> String
+stackYaml resolver = unlines ["resolver: " ++ resolver, "packages:", "- ."]
+
+stackYamlResolver :: String
+stackYamlResolver =
+#if (defined(MIN_VERSION_GLASGOW_HASKELL) && (MIN_VERSION_GLASGOW_HASKELL(8,8,1,0)))
+  "nightly-2019-12-13"
+#elif (defined(MIN_VERSION_GLASGOW_HASKELL) && (MIN_VERSION_GLASGOW_HASKELL(8,6,5,0)))
+  "lts-14.17"
+#elif (defined(MIN_VERSION_GLASGOW_HASKELL) && (MIN_VERSION_GLASGOW_HASKELL(8,4,4,0)))
+  "lts-12.26"
+#elif (defined(MIN_VERSION_GLASGOW_HASKELL) && (MIN_VERSION_GLASGOW_HASKELL(8,2,2,0)))
+  "lts-11.22"
+#endif
