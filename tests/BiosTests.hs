@@ -18,6 +18,7 @@ import System.Log.Logger
 main :: IO ()
 main = do
   updateGlobalLogger "hie-bios" (setLevel DEBUG)
+  writeStackYamlFiles
   defaultMain $
     testGroup "Bios-tests"
       [ testGroup "Find cradle"
