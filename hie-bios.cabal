@@ -141,6 +141,7 @@ Executable hie-bios
   GHC-Options:          -Wall
   HS-Source-Dirs:       exe
   Build-Depends:        base >= 4.9 && < 5
+                      , hslogger >= 1.2 && < 1.4
                       , directory
                       , filepath
                       , ghc

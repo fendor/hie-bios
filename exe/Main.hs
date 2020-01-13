@@ -14,6 +14,7 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hPutStr, hPutStrLn, stdout, stderr, hSetEncoding, utf8)
 import System.FilePath( (</>) )
+import           System.Log.Logger
 
 import HIE.Bios
 import HIE.Bios.Ghc.Check
@@ -55,6 +56,8 @@ instance Exception HhpcError
 
 main :: IO ()
 main = flip E.catches handlers $ do
+    updateGlobalLogger rootLoggerName
+      (setLevel DEBUG)
     hSetEncoding stdout utf8
     args <- getArgs
     cwd <- getCurrentDirectory
