@@ -65,7 +65,7 @@ testDirectory fp step = do
       let relFp = makeRelative (cradleRootDir crd) a_fp
       res <- initializeFlagsWithCradleWithMessage (Just (\_ n _ _ -> step (show n))) relFp crd
       case res of
-        CradleSuccess ini -> do
+        CradleSuccess (ini, _) -> do
           liftIO (step "Initial module load")
           sf <- ini
           case sf of
