@@ -51,6 +51,7 @@ import qualified Data.Conduit.Text as C
 import qualified Data.Text as T
 import           Data.Maybe (fromMaybe)
 import           GHC.Fingerprint (fingerprintString)
+import           Debug.Trace
 ----------------------------------------------------------------
 
 -- | Given root\/foo\/bar.hs, return root\/hie.yaml, or wherever the yaml file was found.
@@ -462,7 +463,7 @@ fixImportDirs base_dir arg =
 
 
 cabalWorkDir :: FilePath -> MaybeT IO FilePath
-cabalWorkDir = findFileUpwards isCabal
+cabalWorkDir = traceShow "cabalWorkDir" $ findFileUpwards isCabal
   where
     isCabal name = name == "cabal.project"
 
@@ -612,7 +613,7 @@ findFileUpwards p dir = do
         pure
         (findFile p dir)
 
-  stopFileExists <- liftIO $ doesFileExist (dir </> ".hie-bios.stop")
+  stopFileExists <- liftIO $ doesFileExist (traceShowId dir </> ".hie-bios.stop")
   case cnts of
     [] | dir' == dir || stopFileExists -> fail "No cabal files"
        | otherwise                     -> findFileUpwards p dir'
@@ -625,7 +626,7 @@ findFile p dir = do
   b <- doesDirectoryExist dir
   if b then getFiles >>= filterM doesPredFileExist else return []
   where
-    getFiles = filter p <$> getDirectoryContents dir
+    getFiles = filter p <$> traceShowId <$> getDirectoryContents dir
     doesPredFileExist file = doesFileExist $ dir </> file
 
 -- | Call a process with the given arguments.
