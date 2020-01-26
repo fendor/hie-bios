@@ -37,6 +37,7 @@ data Cradle a = Cradle {
   -- | The action which needs to be executed to get the correct
   -- command line arguments.
   , cradleOptsProg   :: CradleAction a
+  , cradleArguments  :: [String]
   } deriving (Show)
 
 type LoggingFunction = String -> IO ()

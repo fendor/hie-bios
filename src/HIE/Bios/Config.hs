@@ -15,6 +15,7 @@ import qualified Data.Vector as V
 import qualified Data.HashMap.Strict as Map
 import           Data.Foldable (foldrM)
 import           Data.Yaml
+import           Data.Maybe (fromMaybe)
 
 data CradleConfig a =
     CradleConfig
@@ -25,6 +26,7 @@ data CradleConfig a =
         , cradleType :: CradleType a
         -- ^ Type of the cradle to use. Actions to obtain
         -- compiler flags from are dependant on this field.
+        , cradleArguments :: [String]
         }
         deriving (Show, Eq)
 
@@ -153,13 +155,12 @@ newtype Config a = Config { cradle :: CradleConfig a }
 instance FromJSON a => FromJSON (CradleConfig a) where
     parseJSON (Object val) = do
             crd     <- val .: "cradle"
-            crdDeps <- case Map.size val of
-                1 -> return []
-                2 -> val .: "dependencies"
-                _ -> fail "Unknown key, following keys are allowed: cradle, dependencies"
+            crdDeps <- val .:? "dependencies"
+            crdlArguments <- val .:? "arguments"
 
             return $ CradleConfig { cradleType         = crd
-                                  , cradleDependencies = crdDeps
+                                  , cradleDependencies = fromMaybe [] crdDeps
+                                  , cradleArguments    = fromMaybe [] crdlArguments
                                   }
 
     parseJSON _ = fail "Expected a cradle: key containing the preferences, possible values: cradle, dependencies"

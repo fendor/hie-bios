@@ -24,7 +24,8 @@ import System.Process
 import System.Exit
 import HIE.Bios.Types hiding (ActionName(..))
 import qualified HIE.Bios.Types as Types
-import HIE.Bios.Config
+import HIE.Bios.Config (CradleType(..), CradleConfig(CradleConfig))
+import qualified HIE.Bios.Config as Config
 import HIE.Bios.Environment (getCacheDir)
 import System.Directory hiding (findFile)
 import Control.Monad.Trans.Maybe
@@ -62,7 +63,7 @@ findCradle wfile = do
     runMaybeT (yamlConfig wdir)
 
 -- | Given root\/hie.yaml load the Cradle.
-loadCradle :: FilePath -> IO (Cradle Void)
+loadCradle :: FilePath -> IO (Cradle a)
 loadCradle = loadCradleWithOpts Types.defaultCradleOpts absurd
 
 loadCustomCradle :: (Show a, Show b, Yaml.FromJSON b) => (b -> Cradle a) -> FilePath -> IO (Cradle a)
@@ -86,29 +87,65 @@ loadCradleWithOpts _copts buildCustomCradle wfile = do
     cradleConfig <- readCradleConfig wfile
     return $ getCradle buildCustomCradle (cradleConfig, takeDirectory wfile)
 
-getCradle :: (Show b) => (b -> Cradle a) -> (CradleConfig b, FilePath) -> Cradle a
-getCradle buildCustomCradle (cc, wdir) = addCradleDeps cradleDeps $ case cradleType cc of
-    Cabal mc -> cabalCradle wdir mc
-    CabalMulti ms ->
-      getCradle buildCustomCradle $
-        (CradleConfig cradleDeps
-          (Multi [(p, CradleConfig [] (Cabal (Just c))) | (p, c) <- ms])
-        , wdir)
-    Stack mc -> stackCradle wdir mc
-    StackMulti ms ->
-      getCradle buildCustomCradle $
-        (CradleConfig cradleDeps
-          (Multi [(p, CradleConfig [] (Stack (Just c))) | (p, c) <- ms])
-        , wdir)
- --   Bazel -> rulesHaskellCradle wdir
- --   Obelisk -> obeliskCradle wdir
-    Bios bios deps  -> biosCradle wdir bios deps
-    Direct xs -> directCradle wdir xs
-    None      -> noneCradle wdir
-    Multi ms  -> multiCradle buildCustomCradle wdir ms
-    Other val -> buildCustomCradle val
-    where
-      cradleDeps = cradleDependencies cc
+getCradle
+  :: (Show b) => (b -> Cradle a) -> (CradleConfig b, FilePath) -> Cradle a
+getCradle buildCustomCradle (cc, wdir) =
+  addCradleArguments cradleArgs
+    $ addCradleDeps cradleDeps
+    $ case Config.cradleType cc of
+        Cabal mc -> cabalCradle wdir mc
+        CabalMulti ms ->
+          getCradle buildCustomCradle
+            ( CradleConfig
+              { Config.cradleDependencies = cradleDeps
+              , Config.cradleType         =
+                  Multi
+                    [ ( p
+                      , CradleConfig
+                        { Config.cradleDependencies = []
+                        , Config.cradleType = Cabal (Just c)
+                        , Config.cradleArguments = cradleArgs
+                        }
+                      )
+                    | (p, c) <- ms
+                    ]
+              , Config.cradleArguments    = cradleArgs
+              }
+            , wdir
+            )
+        Stack mc -> stackCradle wdir mc
+        StackMulti ms ->
+          getCradle buildCustomCradle
+            ( CradleConfig
+              { Config.cradleDependencies = cradleDeps
+              , Config.cradleType         =
+                  Multi
+                    [ ( p
+                      , CradleConfig
+                        { Config.cradleDependencies = []
+                        , Config.cradleType = Stack (Just c)
+                        , Config.cradleArguments = cradleArgs
+                        }
+                      )
+                    | (p, c) <- ms
+                    ]
+              , Config.cradleArguments    = cradleArgs
+              }
+            , wdir
+            )
+     --   Bazel -> rulesHaskellCradle wdir
+     --   Obelisk -> obeliskCradle wdir
+        Bios bios deps -> biosCradle wdir bios deps
+        Direct xs      -> directCradle wdir xs
+        None           -> noneCradle wdir
+        Multi ms       -> multiCradle buildCustomCradle wdir ms
+        Other val      -> buildCustomCradle val
+ where
+  cradleDeps = Config.cradleDependencies cc
+  cradleArgs = Config.cradleArguments cc
+
+addCradleArguments :: [String] -> Cradle a -> Cradle a
+addCradleArguments args crdl = crdl { Types.cradleArguments = args }
 
 addCradleDeps :: [FilePath] -> Cradle a -> Cradle a
 addCradleDeps deps c =
@@ -123,7 +160,7 @@ addCradleDeps deps c =
 implicitConfig :: FilePath -> MaybeT IO (CradleConfig a, FilePath)
 implicitConfig fp = do
   (crdType, wdir) <- implicitConfig' fp
-  return (CradleConfig [] crdType, wdir)
+  return (CradleConfig [] crdType [], wdir)
 
 implicitConfig' :: FilePath -> MaybeT IO (CradleType a, FilePath)
 implicitConfig' fp = (\wdir ->
@@ -144,8 +181,8 @@ yamlConfigDirectory = findFileUpwards (configFileName ==)
 
 readCradleConfig :: Yaml.FromJSON b => FilePath -> IO (CradleConfig b)
 readCradleConfig yamlHie = do
-  cfg  <- liftIO $ readConfig' yamlHie
-  return (cradle cfg)
+  cfg  <- liftIO $ Config.readConfig' yamlHie
+  return (Config.cradle cfg)
 
 configFileName :: FilePath
 configFileName = "hie.yaml"
@@ -204,6 +241,7 @@ defaultCradle cur_dir =
         { actionName = Types.Default
         , runCradle = \_ _ -> return (CradleSuccess (ComponentOptions [] []))
         }
+    , cradleArguments = []
     }
 
 ---------------------------------------------------------------
@@ -217,6 +255,7 @@ noneCradle cur_dir =
         { actionName = Types.None
         , runCradle = \_ _ -> return CradleNone
         }
+    , cradleArguments = []
     }
 
 ---------------------------------------------------------------
@@ -230,6 +269,7 @@ multiCradle buildCustomCradle cur_dir cs =
         { actionName = multiActionName
         , runCradle  = \l fp -> canonicalizePath fp >>= multiAction buildCustomCradle cur_dir cs l
         }
+    , cradleArguments = []
     }
   where
     cfgs = map snd cs
@@ -242,17 +282,17 @@ multiCradle buildCustomCradle cur_dir cs =
       | otherwise
       = Types.Multi
 
-    isStackCradleConfig cfg = case cradleType cfg of
+    isStackCradleConfig cfg = case Config.cradleType cfg of
       Stack{}      -> True
       StackMulti{} -> True
       _            -> False
 
-    isCabalCradleConfig cfg = case cradleType cfg of
+    isCabalCradleConfig cfg = case Config.cradleType cfg of
       Cabal{}      -> True
       CabalMulti{} -> True
       _            -> False
 
-    isNoneCradleConfig cfg = case cradleType cfg of
+    isNoneCradleConfig cfg = case Config.cradleType cfg of
       None -> True
       _    -> False
 
@@ -271,7 +311,7 @@ multiAction buildCustomCradle cur_dir cs l cur_fp =
               , "pwd: " ++ cur_dir
               , "filepath" ++ cur_fp
               , "prefixes:"
-              ] ++ [show (pf, cradleType cc) | (pf, cc) <- cs]
+              ] ++ [show (pf, Config.cradleType cc) | (pf, cc) <- cs]
 
     -- Canonicalize the relative paths present in the multi-cradle and
     -- also order the paths by most specific first. In the cradle selection
@@ -302,6 +342,7 @@ directCradle wdir args  =
         { actionName = Types.Direct
         , runCradle = \_ _ -> return (CradleSuccess (ComponentOptions args []))
         }
+    , cradleArguments = []
     }
 
 -------------------------------------------------------------------------
@@ -317,6 +358,7 @@ biosCradle wdir biosProg biosDepsProg =
         { actionName = Types.Bios
         , runCradle = biosAction wdir biosProg biosDepsProg
         }
+    , cradleArguments = []
     }
 
 biosWorkDir :: FilePath -> MaybeT IO FilePath
@@ -359,6 +401,7 @@ cabalCradle wdir mc =
         { actionName = Types.Cabal
         , runCradle = cabalAction wdir mc
         }
+    , cradleArguments = []
     }
 
 cabalCradleDependencies :: FilePath -> IO [FilePath]
@@ -475,9 +518,10 @@ stackCradle wdir mc =
         { actionName = Types.Stack
         , runCradle = stackAction wdir mc
         }
+    , cradleArguments = []
     }
 
-stackCradleDependencies :: FilePath-> IO [FilePath]
+stackCradleDependencies :: FilePath -> IO [FilePath]
 stackCradleDependencies wdir = do
   cabalFiles <- findCabalFiles wdir
   return $ cabalFiles ++ ["package.yaml", "stack.yaml"]
