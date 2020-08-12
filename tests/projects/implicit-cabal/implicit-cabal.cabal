@@ -5,11 +5,6 @@ cabal-version:       >=1.10
 
 name:                implicit-cabal
 version:             0.1.0.0
--- synopsis:
--- description:
--- bug-reports:
--- license:
-license-file:        LICENSE
 author:              Luke Lau
 maintainer:          luke_lau@icloud.com
 -- copyright:
