@@ -4,7 +4,7 @@ module HIE.Bios.Ghc.Check (
   ) where
 
 import GHC (DynFlags(..), GhcMonad)
-import Exception
+import Control.Exception
 
 import HIE.Bios.Environment
 import HIE.Bios.Ghc.Api
@@ -40,7 +40,7 @@ checkSyntax cradle files = do
           either id id <$> check files
   where
     handleRes (CradleSuccess x) f = f x
-    handleRes (CradleFail ce) _f = liftIO $ throwIO ce 
+    handleRes (CradleFail ce) _f = liftIO $ throwIO ce
     handleRes CradleNone _f = return "No cradle"
 
 ----------------------------------------------------------------
