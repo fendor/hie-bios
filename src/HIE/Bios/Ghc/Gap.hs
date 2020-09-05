@@ -129,7 +129,7 @@ setNoCode d = d { G.hscTarget = G.HscNothing }
 
 set_hsc_dflags :: DynFlags -> HscEnv -> HscEnv
 #if __GLASGOW_HASKELL__ >= 811
-set_hsc_dflags dflags hsc_env = hsc_env { hsc_dflags = dflags }
+set_hsc_dflags = G.set_hsc_dflags
 #else
 set_hsc_dflags dflags hsc_env = hsc_env { hsc_dflags = dflags }
 #endif
@@ -149,7 +149,7 @@ overPkgDbRef _f db = db
 
 guessTarget :: GhcMonad m => String -> Maybe G.Phase -> m G.Target
 #if __GLASGOW_HASKELL__ >= 811
-guessTarget a b = G.guessTarget a b
+guessTarget a b = G.guessTarget a Nothing b
 #else
 guessTarget a b = G.guessTarget a b
 #endif
