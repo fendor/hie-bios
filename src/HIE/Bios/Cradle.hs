@@ -23,6 +23,7 @@ module HIE.Bios.Cradle (
   ) where
 
 import Control.Exception (handleJust)
+import Control.Applicative (liftA2)
 import qualified Data.Yaml as Yaml
 import Data.Void
 import Data.Char (isSpace)
@@ -64,6 +65,13 @@ import           GHC.Fingerprint (fingerprintString)
 
 hie_bios_output :: String
 hie_bios_output = "HIE_BIOS_OUTPUT"
+
+hie_bios_ghc :: String
+hie_bios_ghc = "HIE_BIOS_GHC"
+
+hie_bios_ghc_args :: String
+hie_bios_ghc_args = "HIE_BIOS_GHC_ARGS"
+
 ----------------------------------------------------------------
 
 -- | Given root\/foo\/bar.hs, return root\/hie.yaml, or wherever the yaml file was found.
@@ -430,16 +438,51 @@ cabalCradle wdir mc =
         { actionName = Types.Cabal
         , runCradle = cabalAction wdir mc
         , runGhcCmd = \args -> do
-            buildDir <- cabalBuildDir wdir
             -- Workaround for a cabal-install bug on 3.0.0.0:
             -- ./dist-newstyle/tmp/environment.-24811: createDirectory: does not exist (No such file or directory)
-            createDirectoryIfMissing True (buildDir </> "tmp")
+            createDirectoryIfMissing True (wdir </> "dist-newstyle" </> "tmp")
             -- Need to pass -v0 otherwise we get "resolving dependencies..."
-            wrapper_fp <- withCabalWrapperTool ("ghc", []) wdir
-            readProcessWithCwd
-              wdir "cabal" (["--builddir="<>buildDir,"v2-exec","--with-compiler", wrapper_fp, "ghc", "-v0", "--"] ++ args) ""
+            runCabalRuntimeGhc wdir args
         }
     }
+
+getCabalRuntimeGhcPath :: FilePath -> IO (CradleLoadResult String)
+getCabalRuntimeGhcPath wdir = do
+  ghcPathLR <- readProcessWithCwd wdir "cabal" ["v2-exec", "ghc", "-v0", "--" , "-package-env=-", "-e", "System.Environment.getExecutablePath >>= putStrLn"] ""
+  pure $ fmap trim ghcPathLR
+
+getCabalRuntimeGhcLibPath :: FilePath -> IO (CradleLoadResult String)
+getCabalRuntimeGhcLibPath wdir = do
+  ghcLibDirPathLR <- readProcessWithCwd wdir "cabal" ["v2-exec", "ghc", "-v0", "--" , "-package-env=-", "--print-libdir"] ""
+  pure $ fmap trim ghcLibDirPathLR
+
+getCabalRuntimeGhcPaths :: FilePath -> IO (CradleLoadResult (FilePath, FilePath))
+getCabalRuntimeGhcPaths wdir = do
+  ghcPathLR <- getCabalRuntimeGhcPath wdir
+  ghcPathLR `bindIO` \cabalGhcRuntimePath -> do
+    ghcLibDirLR <- getCabalRuntimeGhcLibPath wdir
+    ghcLibDirLR `bindIO` \cabalGhcRuntimeLibDir ->
+      pure $ CradleSuccess (cabalGhcRuntimePath, cabalGhcRuntimeLibDir)
+
+getCabalRuntimeGhc :: FilePath -> IO (CradleLoadResult (FilePath, [String]))
+getCabalRuntimeGhc wdir = do
+  ghcPathsLR <- getCabalRuntimeGhcPaths wdir
+  ghcPathsLR `bindIO` \(cabalGhcRuntimePath, cabalGhcRuntimeLibDir) ->
+      pure $ CradleSuccess (cabalGhcRuntimePath, ["-B" ++ cabalGhcRuntimeLibDir])
+
+runCabalRuntimeGhc :: FilePath -> [String] -> IO (CradleLoadResult String)
+runCabalRuntimeGhc wdir args = do
+  cabalRuntimeGhcLR <- getCabalRuntimeGhc wdir
+  cabalRuntimeGhcLR `bindIO` \(cabalGhcRuntimePath, cabalGhcRuntimeArgs) ->
+    readProcessWithCwd wdir cabalGhcRuntimePath (cabalGhcRuntimeArgs ++ args) ""
+
+-- | Used for clipping the trailing newlines on GHC output
+-- Also only take the last line of output
+-- (Stack's ghc output has a lot of preceding noise from 7zip etc)
+trim :: String -> String
+trim s = case lines s of
+  [] -> s
+  ls -> dropWhileEnd isSpace $ last ls
 
 -- | @'cabalCradleDependencies' rootDir componentDir@.
 -- Compute the dependencies of the cabal cradle based
@@ -524,23 +567,32 @@ cabalAction :: FilePath -> Maybe String -> LoggingFunction -> FilePath -> IO (Cr
 cabalAction work_dir mc l fp = do
     wrapper_fp <- withCabalWrapperTool ("ghc", []) work_dir
     buildDir <- cabalBuildDir work_dir
-    let cab_args = ["--builddir="<>buildDir,"v2-repl", "--with-compiler", wrapper_fp, fromMaybe (fixTargetPath fp) mc]
-    (ex, output, stde, [(_,mb_args)]) <-
-      readProcessWithOutputs [hie_bios_output] l work_dir (proc "cabal" cab_args)
-    let args = fromMaybe [] mb_args
-    case processCabalWrapperArgs args of
-        Nothing -> do
-          -- Best effort. Assume the working directory is the
-          -- the root of the component, so we are right in trivial cases at least.
-          deps <- cabalCradleDependencies work_dir work_dir
-          pure $ CradleFail (CradleError deps ex
-                    ["Failed to parse result of calling cabal"
-                     , unlines output
-                     , unlines stde
-                     , unlines $ args])
-        Just (componentDir, final_args) -> do
-          deps <- cabalCradleDependencies work_dir componentDir
-          pure $ makeCradleResult (ex, stde, componentDir, final_args) deps
+    cabalGhcPathsLR <- getCabalRuntimeGhcPaths work_dir
+    cabalGhcPathsLR `bindIO` \(cabalGhcPath, cabalGhcLibDir) -> do
+      old_env <- getEnvironment
+      let cab_args = ["--builddir="<>buildDir,"v2-repl", "--with-compiler", wrapper_fp, "--with-hc-pkg", cabalGhcLibDir </> "bin" </> "ghc-pkg" , fromMaybe (fixTargetPath fp) mc]
+      let cabalProcessToExecute = (proc "cabal" cab_args)
+            { env = Just
+              $ (hie_bios_ghc, cabalGhcPath)
+              : (hie_bios_ghc_args, "-B" ++ cabalGhcLibDir)
+              : old_env
+            }
+      (ex, output, stde, [(_,mb_args)]) <-
+        readProcessWithOutputs [hie_bios_output] l work_dir cabalProcessToExecute
+      let args = fromMaybe [] mb_args
+      case processCabalWrapperArgs args of
+          Nothing -> do
+            -- Best effort. Assume the working directory is the
+            -- the root of the component, so we are right in trivial cases at least.
+            deps <- cabalCradleDependencies work_dir work_dir
+            pure $ CradleFail (CradleError deps ex
+                      ["Failed to parse result of calling cabal"
+                      , unlines output
+                      , unlines stde
+                      , unlines $ args])
+          Just (componentDir, final_args) -> do
+            deps <- cabalCradleDependencies work_dir componentDir
+            pure $ makeCradleResult (ex, stde, componentDir, final_args) deps
   where
     -- Need to make relative on Windows, due to a Cabal bug with how it
     -- parses file targets with a C: drive in it

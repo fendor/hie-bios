@@ -17,6 +17,8 @@ main = do
       mapM_ (hPutStrLn h) args
       hClose h
     _ -> do
-      ph <- spawnProcess "ghc" (args)
+      ghcPath <- getEnv "HIE_BIOS_GHC"
+      ghcArgs <- getEnv "HIE_BIOS_GHC_ARGS"
+      ph <- spawnProcess ghcPath (ghcArgs ++ args)
       code <- waitForProcess ph
       exitWith code
