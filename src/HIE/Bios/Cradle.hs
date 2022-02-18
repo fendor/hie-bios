@@ -24,16 +24,13 @@ module HIE.Bios.Cradle (
   ) where
 
 import Control.Applicative ((<|>), optional)
+import Data.Bifunctor (first)
 import Control.DeepSeq
 import Control.Exception (handleJust)
 import qualified Data.Yaml as Yaml
 import Data.Void
 import Data.Char (isSpace)
 import System.Exit
-import HIE.Bios.Types hiding (ActionName(..))
-import qualified HIE.Bios.Types as Types
-import HIE.Bios.Config
-import HIE.Bios.Environment (getCacheDir)
 import System.Directory hiding (findFile)
 import Control.Monad
 import Control.Monad.Trans.Cont
@@ -49,14 +46,20 @@ import Data.List
 import Data.List.Extra (trimEnd)
 import Data.Ord (Down(..))
 import qualified Data.Text as T
-import HIE.Bios.Wrappers
 import System.Environment
 import System.FilePath
 import System.PosixCompat.Files
 import System.Info.Extra (isWindows)
-import System.IO (hClose, hGetContents, hSetBuffering, BufferMode(LineBuffering), hPutStr, withFile, IOMode(..))
+import System.IO (hClose, hGetContents, hSetBuffering, BufferMode(LineBuffering), withFile, IOMode(..))
 import System.IO.Error (isPermissionError)
 import System.IO.Temp
+
+import HIE.Bios.Config
+import HIE.Bios.Environment (getCacheDir)
+import HIE.Bios.Types hiding (ActionName(..))
+import HIE.Bios.Wrappers
+import qualified HIE.Bios.Types as Types
+import qualified HIE.Bios.Ghc.Gap as Gap
 
 import GHC.Fingerprint (fingerprintString)
 
