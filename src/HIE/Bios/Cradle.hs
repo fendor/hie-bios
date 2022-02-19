@@ -21,6 +21,7 @@ module HIE.Bios.Cradle (
     , readProcessWithOutputs
     , readProcessWithCwd
     , makeCradleResult
+    , withGhcPkgTool
   ) where
 
 import Control.Applicative ((<|>), optional)
@@ -28,11 +29,13 @@ import Data.Bifunctor (first)
 import Control.DeepSeq
 import Control.Exception (handleJust)
 import qualified Data.Yaml as Yaml
+import Data.Version
 import Data.Void
 import Data.Char (isSpace)
 import System.Exit
 import System.Directory hiding (findFile)
 import Control.Monad
+import Control.Monad.Extra (unlessM)
 import Control.Monad.Trans.Cont
 import Control.Monad.Trans.Maybe
 import Control.Monad.IO.Class
@@ -53,6 +56,7 @@ import System.Info.Extra (isWindows)
 import System.IO (hClose, hGetContents, hSetBuffering, BufferMode(LineBuffering), withFile, IOMode(..))
 import System.IO.Error (isPermissionError)
 import System.IO.Temp
+import Text.ParserCombinators.ReadP (readP_to_S)
 
 import HIE.Bios.Config
 import HIE.Bios.Environment (getCacheDir)
@@ -466,12 +470,52 @@ cabalProcess workDir command args = do
   let newEnvironment = extraEnvironmentArgs ++ environment
   wrapper_fp <- withCabalWrapperTool ("ghc", []) workDir
   buildDir <- cabalBuildDir workDir
-  let cabalArgs = ["--builddir=" <> buildDir, command, "--with-compiler", wrapper_fp] ++ args
-  let cabalProc = proc "cabal" cabalArgs
+  let baseCabalArgs = ["--builddir=" <> buildDir, command, "--with-compiler", wrapper_fp]
+  extraCabalArgs <- case ghcDirLoadResult of
+        CradleSuccess (ghcBin, libdir) -> do
+          ghcPkgPath <- withGhcPkgTool ghcBin libdir
+          pure ["--with-hc-pkg", ghcPkgPath]
+        _ -> pure []
+  let cabalProc = proc "cabal" (baseCabalArgs ++ extraCabalArgs ++ args)
   pure $ CradleSuccess (cabalProc
       { env = Just newEnvironment
       , cwd = Just workDir
       })
+
+withGhcPkgTool :: FilePath -> FilePath -> IO FilePath
+withGhcPkgTool ghcPathAbs libdir = do
+  let ghcName = takeFileName ghcPathAbs
+  -- TODO: check for existence
+  let ghcPkgPath = guessGhcPkgFromGhc ghcName
+  if isWindows
+    then pure ghcPkgPath
+    else withWrapperTool ghcPkgPath
+  where
+    ghcDir = takeDirectory ghcPathAbs
+
+    guessGhcPkgFromGhc ghcName =
+      case parseCompilerId (T.pack ghcName) of
+        Nothing -> ghcDir </> "ghc-pkg"
+        Just version -> ghcDir </> "ghc-pkg-" <> showVersion version
+
+    withWrapperTool ghcPkg = do
+      let globalPackageDb = libdir </> "package.conf.d"
+      let contents = unlines
+            [ "#!/bin/sh"
+            , unwords ["command", ghcPkg, "--global-package-db", globalPackageDb, "${1+\"$@\"}"]
+            ]
+      let srcHash = show (fingerprintString contents)
+      cacheFile "ghc-pkg" srcHash $ \wrapperFp -> writeFile wrapperFp contents
+
+    parseInnerVersion :: T.Text -> Maybe Version
+    parseInnerVersion s =
+      case reverse $ readP_to_S parseVersion (T.unpack s) of
+        (version, "") : _ -> Just version
+        _ -> Nothing
+
+    parseCompilerId v = do
+      let (_, versionStr) = T.breakOnEnd (T.pack "-") v
+      parseInnerVersion versionStr
 
 -- | @'cabalCradleDependencies' rootDir componentDir@.
 -- Compute the dependencies of the cabal cradle based
@@ -519,27 +563,30 @@ type GhcProc = (FilePath, [String])
 -- command-line arguments and exit
 withCabalWrapperTool :: GhcProc -> FilePath -> IO FilePath
 withCabalWrapperTool (mbGhc, ghcArgs) wdir = do
-    cacheDir <- getCacheDir ""
-    createDirectoryIfMissing True cacheDir
     let wrapperContents = if isWindows then cabalWrapperHs else cabalWrapper
-        suffix fp = if isWindows then fp <.> "exe" else fp
+        withExtension fp = if isWindows then fp <.> "exe" else fp
     let srcHash = show (fingerprintString wrapperContents)
-    let wrapper_name = "wrapper-" ++ srcHash
-    let wrapper_fp = suffix $ cacheDir </> wrapper_name
-    exists <- doesFileExist wrapper_fp
-    unless exists $
+    cacheFile (withExtension "wrapper") srcHash $ \wrapper_fp ->
       if isWindows
       then
         withSystemTempDirectory "hie-bios" $ \ tmpDir -> do
-        let wrapper_hs = cacheDir </> wrapper_name <.> "hs"
+        let wrapper_hs = (takeDirectory wrapper_fp) </> (takeFileName wrapper_fp) -<.> "hs"
         writeFile wrapper_hs wrapperContents
         let ghc = (proc mbGhc $
                     ghcArgs ++ ["-rtsopts=ignore", "-outputdir", tmpDir, "-o", wrapper_fp, wrapper_hs])
                     { cwd = Just wdir }
         readCreateProcess ghc "" >>= putStr
       else writeFile wrapper_fp wrapperContents
-    setMode wrapper_fp
-    pure wrapper_fp
+
+cacheFile :: FilePath -> String -> (FilePath -> IO ()) -> IO FilePath
+cacheFile fpName srcHash populate = do
+  cacheDir <- getCacheDir ""
+  createDirectoryIfMissing True cacheDir
+  let newFpName = cacheDir </> (dropExtensions fpName <> "-" <> srcHash) <.> takeExtensions fpName
+  unlessM (doesFileExist newFpName) $ do
+    populate newFpName
+    setMode newFpName
+  pure newFpName
   where
     setMode wrapper_fp = setFileMode wrapper_fp accessModes
 
