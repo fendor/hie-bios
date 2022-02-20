@@ -506,7 +506,7 @@ withGhcPkgTool ghcPathAbs libdir = do
     else withWrapperTool ghcPkgPath
   where
     ghcDir = takeDirectory ghcPathAbs
-    
+
     guessGhcPkgFromGhc ghcName =
       let ghcPkgName = T.replace "ghc" "ghc-pkg" (T.pack ghcName)
       in ghcDir </> T.unpack ghcPkgName
@@ -631,7 +631,7 @@ cabalGHCDir workDir = do
   libdirLoadResult <- readProcessWithCwd workDir  "cabal" ["exec", "-v0", "--", "ghc", "--print-libdir"] ""
   libdirLoadResult `bindIO` \libdir -> do
     exePathLoadResult <- readProcessWithCwd workDir  "cabal"
-        ["exec", "-v0", "--", "ghc", "-e", "do e <- System.Environment.getExecutablePath ; System.IO.putStr e"] ""
+        ["exec", "-v0", "--", "ghc", "-package-env=-", "-e", "do e <- System.Environment.getExecutablePath ; System.IO.putStr e"] ""
     exePathLoadResult `bindIO` \exe -> pure $ CradleSuccess (trimEnd exe, trimEnd libdir)
 
 cabalAction :: FilePath -> Maybe String -> LoggingFunction -> FilePath -> IO (CradleLoadResult ComponentOptions)
