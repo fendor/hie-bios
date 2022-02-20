@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -o xtrace
-
 function out(){
   echo "$1" >> "$HIE_BIOS_OUTPUT"
 }
