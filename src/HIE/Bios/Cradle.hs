@@ -455,29 +455,35 @@ cabalCradle wdir mc =
 cabalProcess :: FilePath -> String -> [String] -> IO (CradleLoadResult CreateProcess)
 cabalProcess workDir command args = do
   ghcDirLoadResult <- cabalGHCDir workDir
-  let extraEnvironmentArgs = case ghcDirLoadResult of
-        CradleSuccess (ghcBin, libdir) ->
-          [("HIE_BIOS_GHC", ghcBin), ("HIE_BIOS_GHC_ARGS",  "-B" ++ libdir)]
-        _ ->
-          -- If we failed to find ghc or libdir, default to GHC on path.
-          -- This might be actually a terrible idea, as there is probably a reason
-          -- why we failed.
-          []
-  environment <- getCleanEnvironment
-  let newEnvironment = extraEnvironmentArgs ++ environment
-  wrapper_fp <- withGhcWrapperTool ("ghc", []) workDir
-  buildDir <- cabalBuildDir workDir
-  let baseCabalArgs = ["--builddir=" <> buildDir, command, "--with-compiler", wrapper_fp]
-  extraCabalArgs <- case ghcDirLoadResult of
-        CradleSuccess (ghcBin, libdir) -> do
-          ghcPkgPath <- withGhcPkgTool ghcBin libdir
-          pure ["--with-hc-pkg", ghcPkgPath]
-        _ -> pure []
-  let cabalProc = proc "cabal" (baseCabalArgs ++ extraCabalArgs ++ args)
-  pure $ CradleSuccess (cabalProc
-      { env = Just newEnvironment
-      , cwd = Just workDir
-      })
+  ghcDirLoadResult `bindIO` \ghcDirs -> do
+    newEnvironment <- setupEnvironment ghcDirs
+    cabalProc <- setupCabalCommand ghcDirs
+    pure $ CradleSuccess (cabalProc
+        { env = Just newEnvironment
+        , cwd = Just workDir
+        })
+  where
+    processEnvironment :: (FilePath, FilePath) -> [(String, String)]
+    processEnvironment (ghcBin, libdir) =
+      [("HIE_BIOS_GHC", ghcBin), ("HIE_BIOS_GHC_ARGS",  "-B" ++ libdir)]
+
+    setupEnvironment :: (FilePath, FilePath) -> IO [(String, String)]
+    setupEnvironment ghcDirs = do
+      environment <- getCleanEnvironment
+      pure $ processEnvironment ghcDirs ++ environment
+
+    setupCabalCommand :: (FilePath, FilePath) -> IO CreateProcess
+    setupCabalCommand (ghcBin, libdir) = do
+      wrapper_fp <- withGhcWrapperTool ("ghc", []) workDir
+      buildDir <- cabalBuildDir workDir
+      ghcPkgPath <- withGhcPkgTool ghcBin libdir
+      let extraCabalArgs =
+            [ "--builddir=" <> buildDir
+            , command
+            , "--with-compiler", wrapper_fp
+            , "--with-hc-pkg", ghcPkgPath
+            ]
+      pure $ proc "cabal" (extraCabalArgs ++ args)
 
 -- | Discovers the location of 'ghc-pkg' given the absolute path to 'ghc'
 -- and its '$libdir' (obtainable by running @ghc --print-libdir@).
@@ -499,8 +505,8 @@ cabalProcess workDir command args = do
 withGhcPkgTool :: FilePath -> FilePath -> IO FilePath
 withGhcPkgTool ghcPathAbs libdir = do
   let ghcName = takeFileName ghcPathAbs
-  -- TODO: check for existence
-  let ghcPkgPath = guessGhcPkgFromGhc ghcName
+      -- TODO: check for existence
+      ghcPkgPath = guessGhcPkgFromGhc ghcName
   if isWindows
     then pure ghcPkgPath
     else withWrapperTool ghcPkgPath
@@ -524,12 +530,12 @@ withGhcPkgTool ghcPathAbs libdir = do
     -- can not use the given 'ghc-pkg'.
     withWrapperTool ghcPkg = do
       let globalPackageDb = libdir </> "package.conf.d"
-      -- This is the same as the wrapper-shims ghc-pkg usually comes with.
-      let contents = unlines
+          -- This is the same as the wrapper-shims ghc-pkg usually comes with.
+          contents = unlines
             [ "#!/bin/sh"
             , unwords ["exec", ghcPkg, "--global-package-db", globalPackageDb, "${1+\"$@\"}"]
             ]
-      let srcHash = show (fingerprintString contents)
+          srcHash = show (fingerprintString contents)
       cacheFile "ghc-pkg" srcHash $ \wrapperFp -> writeFile wrapperFp contents
 
 -- | @'cabalCradleDependencies' rootDir componentDir@.
