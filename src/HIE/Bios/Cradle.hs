@@ -21,7 +21,6 @@ module HIE.Bios.Cradle (
     , readProcessWithOutputs
     , readProcessWithCwd
     , makeCradleResult
-    , withGhcPkgTool
   ) where
 
 import Control.Applicative ((<|>), optional)
@@ -29,7 +28,6 @@ import Data.Bifunctor (first)
 import Control.DeepSeq
 import Control.Exception (handleJust)
 import qualified Data.Yaml as Yaml
-import Data.Version
 import Data.Void
 import Data.Char (isSpace)
 import System.Exit
@@ -56,7 +54,6 @@ import System.Info.Extra (isWindows)
 import System.IO (hClose, hGetContents, hSetBuffering, BufferMode(LineBuffering), withFile, IOMode(..))
 import System.IO.Error (isPermissionError)
 import System.IO.Temp
-import Text.ParserCombinators.ReadP (readP_to_S)
 
 import HIE.Bios.Config
 import HIE.Bios.Environment (getCacheDir)
@@ -468,7 +465,7 @@ cabalProcess workDir command args = do
           []
   environment <- getCleanEnvironment
   let newEnvironment = extraEnvironmentArgs ++ environment
-  wrapper_fp <- withCabalWrapperTool ("ghc", []) workDir
+  wrapper_fp <- withGhcWrapperTool ("ghc", []) workDir
   buildDir <- cabalBuildDir workDir
   let baseCabalArgs = ["--builddir=" <> buildDir, command, "--with-compiler", wrapper_fp]
   extraCabalArgs <- case ghcDirLoadResult of
@@ -482,6 +479,23 @@ cabalProcess workDir command args = do
       , cwd = Just workDir
       })
 
+-- | Discovers the location of 'ghc-pkg' given the absolute path to 'ghc'
+-- and its '$libdir' (obtainable by running @ghc --print-libdir@).
+--
+-- @'withGhcPkgTool' ghcPathAbs libdir@ guesses the location by looking at
+-- the filename of 'ghcPathAbs' and expects that 'ghc-pkg' is right next to it,
+-- which is guaranteed by the ghc build system. Most OS's follow this
+-- convention.
+--
+-- On unix, there is a high-chance that the obtained 'ghc' location is the
+-- "unwrapped" executable, e.g. the executable without a shim that specifies
+-- the '$libdir' and other important constants.
+-- As such, the executable 'ghc-pkg' is similarly without a wrapper shim and
+-- is lacking certain constants such as 'global-package-db'. It is, therefore,
+-- not suitable to pass in to other consumers, such as 'cabal'.
+--
+-- Here, we restore the wrapper-shims, if necessary, thus the returned filepath
+-- can be passed to 'cabal' without further modifications.
 withGhcPkgTool :: FilePath -> FilePath -> IO FilePath
 withGhcPkgTool ghcPathAbs libdir = do
   let ghcName = takeFileName ghcPathAbs
@@ -493,29 +507,37 @@ withGhcPkgTool ghcPathAbs libdir = do
   where
     ghcDir = takeDirectory ghcPathAbs
 
-    guessGhcPkgFromGhc ghcName =
-      case parseCompilerId (T.pack ghcName) of
-        Nothing -> ghcDir </> "ghc-pkg"
-        Just version -> ghcDir </> "ghc-pkg-" <> showVersion version
+    -- Only append 'exe' on windows
+    exe = if isWindows then "exe" else ""
 
+    guessGhcPkgFromGhc ghcName =
+      case T.stripPrefix "ghc" (T.pack $ dropExtensions ghcName) of
+        -- This case is weird, if the prefix isn't 'ghc' what is supposed to happen?
+        Nothing -> ghcDir </> "ghc-pkg" <.> exe
+        Just ghcSuffix
+          | ghcSuffix == "" -> ghcDir </> "ghc-pkg" <.> exe
+          | otherwise -> ghcDir </> "ghc-pkg-" <> T.unpack ghcSuffix <.> exe
+
+    -- Only on unix, creates a wrapper script that's hopefully identical
+    -- to the wrapper script 'ghc-pkg' usually comes with.
+    --
+    -- 'ghc-pkg' needs to know the 'global-package-db' location which is
+    -- passed in via a wrapper shim that basically wraps 'ghc-pkg' and
+    -- only passes in the correct 'global-package-db'.
+    -- For an example on how the wrapper script is supposed to look like, take
+    -- a look at @cat $(which ghc-pkg)@, assuming 'ghc-pkg' is on your $PATH.
+    --
+    -- If we used the raw executable, i.e. not wrapped in a shim, then 'cabal'
+    -- can not use the given 'ghc-pkg'.
     withWrapperTool ghcPkg = do
       let globalPackageDb = libdir </> "package.conf.d"
+      -- This is the same as the wrapper-shims ghc-pkg usually comes with.
       let contents = unlines
             [ "#!/bin/sh"
-            , unwords ["command", ghcPkg, "--global-package-db", globalPackageDb, "${1+\"$@\"}"]
+            , unwords ["exec", ghcPkg, "--global-package-db", globalPackageDb, "${1+\"$@\"}"]
             ]
       let srcHash = show (fingerprintString contents)
       cacheFile "ghc-pkg" srcHash $ \wrapperFp -> writeFile wrapperFp contents
-
-    parseInnerVersion :: T.Text -> Maybe Version
-    parseInnerVersion s =
-      case reverse $ readP_to_S parseVersion (T.unpack s) of
-        (version, "") : _ -> Just version
-        _ -> Nothing
-
-    parseCompilerId v = do
-      let (_, versionStr) = T.breakOnEnd (T.pack "-") v
-      parseInnerVersion versionStr
 
 -- | @'cabalCradleDependencies' rootDir componentDir@.
 -- Compute the dependencies of the cabal cradle based
@@ -558,11 +580,11 @@ processCabalWrapperArgs args =
 -- arguments to the executable.
 type GhcProc = (FilePath, [String])
 
--- | Generate a fake GHC that can be passed to cabal
+-- | Generate a fake GHC that can be passed to cabal or stack
 -- when run with --interactive, it will print out its
 -- command-line arguments and exit
-withCabalWrapperTool :: GhcProc -> FilePath -> IO FilePath
-withCabalWrapperTool (mbGhc, ghcArgs) wdir = do
+withGhcWrapperTool :: GhcProc -> FilePath -> IO FilePath
+withGhcWrapperTool (mbGhc, ghcArgs) wdir = do
     let wrapperContents = if isWindows then cabalWrapperHs else cabalWrapper
         withExtension fp = if isWindows then fp <.> "exe" else fp
     let srcHash = show (fingerprintString wrapperContents)
@@ -570,7 +592,7 @@ withCabalWrapperTool (mbGhc, ghcArgs) wdir = do
       if isWindows
       then
         withSystemTempDirectory "hie-bios" $ \ tmpDir -> do
-        let wrapper_hs = (takeDirectory wrapper_fp) </> (takeFileName wrapper_fp) -<.> "hs"
+        let wrapper_hs = wrapper_fp -<.> "hs"
         writeFile wrapper_hs wrapperContents
         let ghc = (proc mbGhc $
                     ghcArgs ++ ["-rtsopts=ignore", "-outputdir", tmpDir, "-o", wrapper_fp, wrapper_hs])
@@ -578,6 +600,19 @@ withCabalWrapperTool (mbGhc, ghcArgs) wdir = do
         readCreateProcess ghc "" >>= putStr
       else writeFile wrapper_fp wrapperContents
 
+-- | Create and cache a file in hie-bios's cache directory.
+--
+-- @'cacheFile' fpName srcHash populate@. 'fpName' is the pattern name of the
+-- cached file you want to create. 'srcHash' is the hash that is appended to
+-- the file pattern and is expected to change whenever you want to invalidate
+-- the cache.
+--
+-- If the cached file's 'srcHash' changes, then a new file is created, but
+-- the old cached file name will not be deleted.
+--
+-- If the file does not exist yet, 'populate' is invoked with cached file
+-- location and it is expected that the caller persists the given filepath in
+-- the File System.
 cacheFile :: FilePath -> String -> (FilePath -> IO ()) -> IO FilePath
 cacheFile fpName srcHash populate = do
   cacheDir <- getCacheDir ""
@@ -747,7 +782,7 @@ stackAction :: FilePath -> Maybe String -> StackYaml -> LoggingFunction -> FileP
 stackAction workDir mc syaml l _fp = do
   let ghcProcArgs = ("stack", stackYamlProcessArgs syaml <> ["exec", "ghc", "--"])
   -- Same wrapper works as with cabal
-  wrapper_fp <- withCabalWrapperTool ghcProcArgs workDir
+  wrapper_fp <- withGhcWrapperTool ghcProcArgs workDir
   (ex1, _stdo, stde, [(_, maybeArgs)]) <-
     readProcessWithOutputs [hie_bios_output] l workDir $
     stackProcess syaml
