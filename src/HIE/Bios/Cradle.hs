@@ -506,17 +506,10 @@ withGhcPkgTool ghcPathAbs libdir = do
     else withWrapperTool ghcPkgPath
   where
     ghcDir = takeDirectory ghcPathAbs
-
-    -- Only append 'exe' on windows
-    exe = if isWindows then "exe" else ""
-
+    
     guessGhcPkgFromGhc ghcName =
-      case T.stripPrefix "ghc" (T.pack $ dropExtensions ghcName) of
-        -- This case is weird, if the prefix isn't 'ghc' what is supposed to happen?
-        Nothing -> ghcDir </> "ghc-pkg" <.> exe
-        Just ghcSuffix
-          | ghcSuffix == "" -> ghcDir </> "ghc-pkg" <.> exe
-          | otherwise -> ghcDir </> "ghc-pkg-" <> T.unpack ghcSuffix <.> exe
+      let ghcPkgName = T.replace "ghc" "ghc-pkg" (T.pack ghcName)
+      in ghcDir </> T.unpack ghcPkgName
 
     -- Only on unix, creates a wrapper script that's hopefully identical
     -- to the wrapper script 'ghc-pkg' usually comes with.
