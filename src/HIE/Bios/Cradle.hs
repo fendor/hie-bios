@@ -63,6 +63,7 @@ import qualified HIE.Bios.Types as Types
 import qualified HIE.Bios.Ghc.Gap as Gap
 
 import GHC.Fingerprint (fingerprintString)
+import GHC.ResponseFile (escapeArgs)
 
 hie_bios_output :: String
 hie_bios_output = "HIE_BIOS_OUTPUT"
@@ -529,10 +530,16 @@ withGhcPkgTool ghcPathAbs libdir = do
           -- This is the same as the wrapper-shims ghc-pkg usually comes with.
           contents = unlines
             [ "#!/bin/sh"
-            , unwords ["exec", ghcPkg, "--global-package-db", globalPackageDb, "${1+\"$@\"}"]
+            , unwords ["exec", escapeFilePath ghcPkg
+                      , "--global-package-db", escapeFilePath globalPackageDb
+                      , "${1+\"$@\"}"
+                      ]
             ]
           srcHash = show (fingerprintString contents)
       cacheFile "ghc-pkg" srcHash $ \wrapperFp -> writeFile wrapperFp contents
+
+    -- Escape the filepath and trim excess newlines added by 'escapeArgs'
+    escapeFilePath fp = trimEnd $ escapeArgs [fp]
 
 -- | @'cabalCradleDependencies' rootDir componentDir@.
 -- Compute the dependencies of the cabal cradle based
