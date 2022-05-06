@@ -1,5 +1,7 @@
 # ChangeLog hie-bios
 
+## 2022-05-06 - 0.10.0
+
 ## 2022-03-07 - 0.9.1
 
 * Ignore .ghci files while querying project GHC [#337](https://github.com/haskell/hie-bios/pull/337)
