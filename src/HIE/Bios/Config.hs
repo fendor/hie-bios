@@ -21,7 +21,8 @@ module HIE.Bios.Config(
     Callable(..)
     ) where
 
-import Control.Exception
+import           Control.Exception
+import           Colog.Core (LogAction (..), WithSeverity (..), Severity (..), (<&))
 import           Data.Maybe (mapMaybe, fromMaybe)
 import           Data.Monoid (Last(..))
 import           Data.Aeson (JSONPath)
@@ -31,6 +32,13 @@ import           Data.Yaml.Internal (Warning(..))
 import           HIE.Bios.Config.YAML (CradleConfigYAML)
 import qualified HIE.Bios.Config.YAML as YAML
 
+
+-- | Logging type
+data Log
+    = LogUnknownFields [String]
+
+
+--
 
 -- | Configuration that can be used to load a 'Cradle'.
 -- A configuration has roughly the following form:
@@ -128,8 +136,8 @@ instance Show (CradleType a) where
     show (Multi a) = "Multi " ++ show a
     show (Other _ val) = "Other {originalYamlValue = " ++ show val ++ "}"
 
-readConfig :: FromJSON a => FilePath -> IO (Config a)
-readConfig fp = do
+readConfig :: FromJSON a => LogAction IO (WithSeverity Log) -> FilePath -> IO (Config a)
+readConfig logger fp = do
   result <- decodeFileWithWarnings fp
   fmap fromYAMLConfig $ either throwIO failOnAnyDuplicate result
   where

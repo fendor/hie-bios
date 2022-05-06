@@ -206,7 +206,7 @@ implicitConfig = (fmap . first) (CradleConfig noDeps) . inferCradleType
   noDeps :: [FilePath]
   noDeps = []
 
-yamlConfig :: FilePath ->  MaybeT IO FilePath
+yamlConfig :: FilePath -> MaybeT IO FilePath
 yamlConfig fp = do
   configDir <- yamlConfigDirectory fp
   return (configDir </> configFileName)
