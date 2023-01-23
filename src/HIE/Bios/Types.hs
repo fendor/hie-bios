@@ -7,7 +7,6 @@ module HIE.Bios.Types where
 import           System.Exit
 import qualified Colog.Core as L
 import           Control.Exception              ( Exception )
-import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 #if MIN_VERSION_base(4,9,0)
@@ -15,8 +14,6 @@ import qualified Control.Monad.Fail as Fail
 #endif
 import Data.Text.Prettyprint.Doc
 
-
-data BIOSVerbosity = Silent | Verbose
 
 ----------------------------------------------------------------
 
@@ -165,9 +162,24 @@ data CradleError = CradleError
   -- Can be watched for changes to attempt a reload of the cradle.
   , cradleErrorExitCode :: ExitCode
   -- ^ ExitCode of the cradle loading mechanism.
-  , cradleErrorStderr :: [String]
+  , cradleErrorType :: CradleErrorType
   -- ^ Standard error output that can be shown to users to explain
   -- the loading error.
+  }
+  deriving (Show, Eq)
+
+data CradleErrorType
+  = ProcessInvocationError [String]
+  | ProcessUnexpectedOutput [String]
+  | MultiCradleNoPrefixMatched FilePath FilePath [String]
+  | OtherError [String]
+  deriving (Show, Eq)
+
+data BiosProcSpec = BiosProcSpec
+  { biosProcSpecCmd :: String
+  , biosProcSpecArgs :: [String]
+  , biosProcSpecExtraArgs :: [String]
+  , biosProcSpecWorkingDir :: FilePath
   }
   deriving (Show, Eq)
 

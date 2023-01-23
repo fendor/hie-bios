@@ -361,12 +361,6 @@ multiAction buildCustomCradle cur_dir cs l cur_fp =
     selectCradle =<< canonicalizeCradles
 
   where
-    err_msg = ["Multi Cradle: No prefixes matched"
-              , "pwd: " ++ cur_dir
-              , "filepath: " ++ cur_fp
-              , "prefixes:"
-              ] ++ [show (pf, cradleType cc) | (pf, cc) <- cs]
-
     -- Canonicalize the relative paths present in the multi-cradle and
     -- also order the paths by most specific first. In the cradle selection
     -- function we want to choose the most specific cradle possible.
@@ -376,7 +370,8 @@ multiAction buildCustomCradle cur_dir cs l cur_fp =
         <$> mapM (\(p, c) -> (,c) <$> makeAbsolute (cur_dir </> p)) cs
 
     selectCradle [] =
-      return (CradleFail (CradleError [] ExitSuccess err_msg))
+      return (CradleFail (CradleError [] ExitSuccess
+        (MultiCradleNoPrefixMatched cur_dir cur_fp [show (pf, cradleType cc) | (pf, cc) <- cs])))
     selectCradle ((p, c): css) =
         if p `isPrefixOf` cur_fp
           then runCradle
@@ -724,7 +719,7 @@ cabalAction workDir mc l fp = do
     deps <- liftIO $ cabalCradleDependencies workDir workDir
     let cmd = show (["cabal", cabalCommand] <> cabalArgs)
     let errorMsg = "Failed to run " <> cmd <> " in directory \"" <> workDir <> "\". Consult the logs for full command and error."
-    throwCE (CradleError deps ex ([errorMsg] <> errorDetails))
+    throwCE (CradleError deps ex (ProcessInvocationError $ [errorMsg] <> errorDetails))
 
   case processCabalWrapperArgs args of
     Nothing -> do
@@ -733,7 +728,7 @@ cabalAction workDir mc l fp = do
       -- root of the component, so we are right in trivial cases at least.
       deps <- liftIO $ cabalCradleDependencies workDir workDir
       throwCE (CradleError deps ex $
-                (["Failed to parse result of calling cabal" ] <> errorDetails))
+                (ProcessUnexpectedOutput $ ["Failed to parse result of calling cabal" ] <> errorDetails))
     Just (componentDir, final_args) -> do
       deps <- liftIO $ cabalCradleDependencies workDir componentDir
       CradleLoadResultT $ pure $ makeCradleResult (ex, stde, componentDir, final_args) deps
@@ -859,7 +854,7 @@ stackAction workDir mc syaml l _fp = do
     stackProcess l syaml
                 (["repl", "--no-nix-pure", "--with-ghc", wrapper_fp]
                     <> [ comp | Just comp <- [mc] ]) >>=
-      readProcessWithOutputs [hie_bios_output] l workDir 
+      readProcessWithOutputs [hie_bios_output] l workDir
   (ex2, pkg_args, stdr, _) <-
     stackProcess l syaml ["path", "--ghc-package-path"] >>=
       readProcessWithOutputs [hie_bios_output] l workDir
@@ -872,7 +867,7 @@ stackAction workDir mc syaml l _fp = do
         -- the root of the component, so we are right in trivial cases at least.
         deps <- stackCradleDependencies workDir workDir syaml
         pure $ CradleFail
-                  (CradleError deps ex1 $
+                  (CradleError deps ex1 $ ProcessUnexpectedOutput $
                     [ "Failed to parse result of calling stack" ]
                     ++ stde
                     ++ args
@@ -1080,7 +1075,7 @@ removeFileIfExists f = do
 makeCradleResult :: (ExitCode, [String], FilePath, [String]) -> [FilePath] -> CradleLoadResult ComponentOptions
 makeCradleResult (ex, err, componentDir, gopts) deps =
   case ex of
-    ExitFailure _ -> CradleFail (CradleError deps ex err)
+    ExitFailure _ -> CradleFail (CradleError deps ex $ OtherError err)
     _ ->
         let compOpts = ComponentOptions gopts componentDir deps
         in CradleSuccess compOpts
@@ -1112,10 +1107,10 @@ readProcessWithCwd' createdProcess stdin = do
   case mResult of
     Just (ExitSuccess, stdo, _) -> pure stdo
     Just (exitCode, stdo, stde) -> throwCE $
-      CradleError [] exitCode $
+      CradleError [] exitCode $ ProcessInvocationError $
         ["Error when calling " <> cmdString, stdo, stde] <> prettyProcessEnv createdProcess
     Nothing -> throwCE $
-      CradleError [] ExitSuccess $
+      CradleError [] ExitSuccess $ ProcessInvocationError $
         ["Couldn't execute " <> cmdString] <> prettyProcessEnv createdProcess
 
 -- | Prettify 'CmdSpec', so we can show the command to a user
@@ -1140,4 +1135,4 @@ loggedProc :: LogAction IO (WithSeverity Log) -> FilePath -> [String] -> IO Crea
 loggedProc l command args = do
   l <& LogProcessOutput (unwords $ "executing command:":command:args) `WithSeverity` Debug
   pure $ proc command args
- 
+

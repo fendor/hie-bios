@@ -48,11 +48,11 @@ debugInfo logger fp cradle = unlines <$> do
           , "Cradle:                " ++ crdl
           , "Dependencies:          " ++ unwords deps
           ]
-      CradleFail (CradleError deps ext stderr) ->
+      CradleFail (CradleError deps ext err) ->
         return ["Cradle failed to load"
                , "Deps: " ++ show deps
                , "Exit Code: " ++ show ext
-               , "Stderr: " ++ unlines stderr]
+               , "Error Type: " ++ show err]
       CradleNone ->
         return ["No cradle"]
   where
