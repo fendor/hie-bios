@@ -802,7 +802,6 @@ cabalAction (ResolvedCradles root cs vs) workDir mc l projectFile fp fps = do
         | ghc   >= makeVersion [9,4]
         , cabal >= makeVersion [3,11]
         -> case fps of
-          [] -> [fromMaybe (fixTargetPath fp) mc]
           -- Start a multi-component session with all the old files
           _ -> "--keep-temp-files"
              : "--enable-multi-repl"
