@@ -157,6 +157,7 @@ cabalAction cradles workDir mc l projectFile fp loadStyle = do
   (cabalArgs, loadingFiles, extraDeps) <- processCabalLoadStyle l cradles projectFile workDir mc fp determinedLoadStyle
 
   cabalFeatures <- determineCabalLoadFeature progVersions
+  liftIO $ l <& LogCabalLoad fp mc (prefix <$> resolvedCradles cradles) loadingFiles `WithSeverity` Debug
   let
     -- Used for @cabal >= 3.15@ but @lib:Cabal <3.15@, in custom setups.
     mkFallbackCabalProc = cabalLoadFilesBefore315 l progVersions projectFile workDir cabalArgs
@@ -257,17 +258,16 @@ processCabalLoadStyle :: MonadIO m => LogAction IO (WithSeverity Log) -> Resolve
 processCabalLoadStyle l cradles projectFile workDir mc fp loadStyle = do
   let fpModule = fromMaybe (fixTargetPath fp) mc
   (cabalArgs, loadingFiles, extraDeps) <- case loadStyle of
-        LoadFile -> pure ([fpModule], [fp], [])
-        LoadWithContext fps -> do
-          (modPairs, mergedDeps) <- moduleFilesFromSameProject fps
-          let allModPairs = nubOrd $ (fpModule, fp) : modPairs
-              allModules  = nubOrd $ fmap fst allModPairs
-              allFiles    = nubOrd $ fmap snd allModPairs
-          pure (["--enable-multi-repl"] ++ allModules, allFiles, mergedDeps)
+    LoadFile -> pure ([fpModule], [fp], [])
+    LoadWithContext fps -> do
+      (modPairs, mergedDeps) <- moduleFilesFromSameProject fps
+      let allModPairs = nubOrd $ (fpModule, fp) : modPairs
+          allModules  = nubOrd $ fmap fst allModPairs
+          allFiles    = nubOrd $ fmap snd allModPairs
+      pure (["--enable-multi-repl"] ++ allModules, allFiles, mergedDeps)
 
   liftIO $ l <& LogComputedCradleLoadStyle "cabal" loadStyle `WithSeverity` Info
-  liftIO $ l <& LogCabalLoad fp mc (prefix <$> resolvedCradles cradles) loadingFiles `WithSeverity` Debug
-  pure (cabalArgs, loadingFiles, extraDeps)
+  pure ("--keep-temp-files" : cabalArgs, loadingFiles, extraDeps)
   where
     -- Need to make relative on Windows, due to a Cabal bug with how it
     -- parses file targets with a C: drive in it. So we decide to make
@@ -300,7 +300,7 @@ cabalLoadFilesWithRepl l projectFile workDir args = do
 
   newEnvironment <- liftIO Process.getCleanEnvironment
   wrapper_fp <- liftIO $ withReplWrapperTool l (proc "ghc") workDir
-  pure (proc "cabal" ([cabalCommand, "--keep-temp-files", "--with-repl", wrapper_fp] <> projectFileProcessArgs projectFile <> args))
+  pure (proc "cabal" ([cabalCommand, "--with-repl", wrapper_fp] <> projectFileProcessArgs projectFile <> args))
     { env = Just newEnvironment
     , cwd = Just workDir
     }
@@ -344,21 +344,21 @@ cabalCradleDependencies projectFile rootDir componentDir = do
 --   a reload when changed.
 cabalCradleDependenciesEnclosing :: CradleProjectConfig -> FilePath -> FilePath -> IO [FilePath]
 cabalCradleDependenciesEnclosing projectFile rootDir fp = do
-    cabalFiles' <- findCabalFilesEnclosing fp
-    let relCabalFiles = map (makeRelative rootDir) cabalFiles'
-    return $ map normalise $ relCabalFiles ++ projectLocationOrDefault projectFile
-    where
-      -- find the cabal file upwards from fp to rootDir
-      findCabalFilesEnclosing :: FilePath -> IO [FilePath]
-      findCabalFilesEnclosing dir = do
-            cfs <- map (dir </>) <$> findCabalFiles dir
-            if not (null cfs)
-              then return cfs
-              else
-                let parentDir = takeDirectory dir
-                in if parentDir == dir || length parentDir < length rootDir
-                   then return []
-                   else findCabalFilesEnclosing parentDir
+  cabalFiles' <- findCabalFilesEnclosing fp
+  let relCabalFiles = map (makeRelative rootDir) cabalFiles'
+  return $ map normalise $ relCabalFiles ++ projectLocationOrDefault projectFile
+  where
+    -- find the cabal file upwards from fp to rootDir
+    findCabalFilesEnclosing :: FilePath -> IO [FilePath]
+    findCabalFilesEnclosing dir = do
+      cfs <- map (dir </>) <$> findCabalFiles dir
+      if not (null cfs)
+        then return cfs
+        else
+          let parentDir = takeDirectory dir
+          in if parentDir == dir || length parentDir < length rootDir
+              then return []
+              else findCabalFilesEnclosing parentDir
 
 processCabalWrapperArgs :: [String] -> Maybe (FilePath, [String])
 processCabalWrapperArgs args =
@@ -378,13 +378,8 @@ processCabalWrapperArgs args =
 -- ----------------------------------------------------------------------------
 
 cabalLoadFilesBefore315 :: LogAction IO (WithSeverity Log) -> ProgramVersions -> CradleProjectConfig -> [Char] -> [String] -> CradleLoadResultT IO CreateProcess
-cabalLoadFilesBefore315 l progVersions projectFile workDir args' = do
+cabalLoadFilesBefore315 l progVersions projectFile workDir args = do
   let cabalCommand = "v2-repl"
-  cabal_version <- liftIO $ runCachedIO $ cabalVersion progVersions
-
-  let args = case cabal_version of
-        Just v | v < makeVersion [3,15] -> "--keep-temp-files" : args'
-        _ -> args'
   cabalProcess l progVersions projectFile workDir cabalCommand args `modCradleError` \err -> do
     deps <- cabalCradleDependencies projectFile workDir workDir
     pure $ err {cradleErrorDependencies = cradleErrorDependencies err ++ deps}
