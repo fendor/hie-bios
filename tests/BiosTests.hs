@@ -4,7 +4,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeApplications #-}
-module Main where
+module BiosTests where
 
 import Utils
 
@@ -70,17 +70,20 @@ main = do
     -- Run tests sequentially on Windows, to avoid issues with locking of the
     -- package database, e.g. errors of the form:
     --   package.db/package.cache.lock: openBinaryFile: resource busy (file is locked)
-    (if isWindows then localOption (Tasty.NumThreads 1) else id) $
-    testGroup "Bios-tests"
-      [ testGroup "Find cradle" findCradleTests
-      , testGroup "Symlink" symbolicLinkTests
-      , testGroup "Loading tests"
-        [ testGroup "bios" biosTestCases
-        , testGroup "direct" directTestCases
-        , testGroupWithDependency cabalDep (cabalTestCases extraGhcDep)
-        , ignoreOnUnsupportedGhc $ testGroupWithDependency stackDep stackTestCases
-        ]
+    (if isWindows then localOption (Tasty.NumThreads 1) else id) tests
+
+tests :: TestTree
+tests =
+  testGroup "Bios-tests"
+    [ testGroup "Find cradle" findCradleTests
+    , testGroup "Symlink" symbolicLinkTests
+    , testGroup "Loading tests"
+      [ testGroup "bios" biosTestCases
+      , testGroup "direct" directTestCases
+      , testGroupWithDependency cabalDep (cabalTestCases extraGhcDep)
+      , ignoreOnUnsupportedGhc $ testGroupWithDependency stackDep stackTestCases
       ]
+    ]
 
 symbolicLinkTests :: [TestTree]
 symbolicLinkTests =

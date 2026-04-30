@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Main where
+module ParserTests where
 
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -24,7 +24,10 @@ configDir :: FilePath
 configDir = "tests/configs"
 
 main :: IO ()
-main = defaultMain $
+main = defaultMain tests
+
+tests :: TestTree
+tests =
   testGroup "Parser Tests"
     [ assertParser "cabal-1.yaml" (noDeps (Cabal $ CabalType (Just "lib:hie-bios") Nothing))
     , assertParser "stack-config.yaml" (noDeps (Stack $ StackType Nothing Nothing))
