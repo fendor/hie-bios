@@ -92,6 +92,7 @@
             "temporary"
             "text"
             "ghc"
+            "yaml"
           ];
           source-dirs = "tests/";
           main = "Main";

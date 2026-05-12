@@ -62,26 +62,24 @@ main :: IO ()
 main = do
   for_ [stderr, stdout] (`hSetBuffering` LineBuffering)
   writeStackYamlFiles
-  stackDep <- checkToolIsAvailable "stack"
-  cabalDep <- checkToolIsAvailable "cabal"
-  extraGhcDep <- checkToolIsAvailable extraGhc
+  toolDeps <- getToolDeps
 
   defaultMainWithIngredients (ignoreToolTests:verboseLogging:defaultIngredients) $
     -- Run tests sequentially on Windows, to avoid issues with locking of the
     -- package database, e.g. errors of the form:
     --   package.db/package.cache.lock: openBinaryFile: resource busy (file is locked)
-    (if isWindows then localOption (Tasty.NumThreads 1) else id) tests
+    (if isWindows then localOption (Tasty.NumThreads 1) else id) (tests toolDeps)
 
-tests :: TestTree
-tests =
+tests :: ToolDependencies -> TestTree
+tests ToolDependencies{..} =
   testGroup "Bios-tests"
     [ testGroup "Find cradle" findCradleTests
     , testGroup "Symlink" symbolicLinkTests
     , testGroup "Loading tests"
       [ testGroup "bios" biosTestCases
       , testGroup "direct" directTestCases
-      , testGroupWithDependency cabalDep (cabalTestCases extraGhcDep)
-      , ignoreOnUnsupportedGhc $ testGroupWithDependency stackDep stackTestCases
+      , testGroupWithDependency cabalToolDep (cabalTestCases extraGhcToolDep)
+      , ignoreOnUnsupportedGhc $ testGroupWithDependency stackToolDep stackTestCases
       ]
     ]
 
@@ -512,6 +510,19 @@ stackYamlResolver =
 -- Most tests have some run-time tool dependencies.
 -- We only want to run tests if these tools are available.
 -- ------------------------------------------------------------------
+
+data ToolDependencies = ToolDependencies
+  { cabalToolDep :: ToolDependency
+  , stackToolDep :: ToolDependency
+  , extraGhcToolDep :: ToolDependency
+  }
+
+getToolDeps :: IO ToolDependencies
+getToolDeps = do
+  ToolDependencies
+    <$> checkToolIsAvailable "cabal"
+    <*> checkToolIsAvailable "stack"
+    <*> checkToolIsAvailable extraGhc
 
 data ToolDependency = ToolDependency
   { toolName :: String
