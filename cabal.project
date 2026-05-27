@@ -9,3 +9,5 @@ if impl(ghc >= 9.14.1)
         , deepseq
         , ghc-prim
         , time
+
+tests: True

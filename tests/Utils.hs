@@ -94,6 +94,7 @@ import Test.Tasty.HUnit
 import Colog.Core
 import qualified Data.Text as Text
 import Data.Function ((&))
+import qualified GHC.Driver.Env as G
 
 -- ---------------------------------------------------------------------------
 -- Test configuration and information
@@ -335,13 +336,17 @@ loadFileGhc fp = do
   liftIO $
     G.runGhc (Just libdir) $ do
       let (ini, _) = initSessionWithMessage' True (Just G.batchMsg) opts
+      env <- G.getSession
+      G.setSession (G.hscUpdateFlags (\ dflags -> dflags { G.verbosity = 3 }) env)
       sf <- ini
       case sf of
         -- Test resetting the targets
         Succeeded -> do
           liftIO $ stepF "Set target files"
           setTargetFiles mempty [(a_fp, a_fp)]
-        Failed -> liftIO $ assertFailure "Module loading failed"
+        Failed -> do
+          liftIO $ G.loggerTraceFlush $ G.hsc_logger env
+          liftIO $ assertFailure "Module loading failed"
 
 loadFileGhcMultiStyle :: FilePath -> [FilePath] -> TestM ()
 loadFileGhcMultiStyle fp extraFps = do

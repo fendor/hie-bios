@@ -1,2 +1,2 @@
 cradle:
-  direct: {arguments: ["-Walaaal", "A", "B"] }
+  direct: {arguments: ["A", "B"] }

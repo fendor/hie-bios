@@ -420,7 +420,7 @@ stackTestCases =
 
 directTestCases :: [TestTree]
 directTestCases =
-  [ biosTestCase "simple-direct" $ runTestEnv  "./simple-direct" $ do
+  [ biosTestCase "simple-direct" $ runTestEnv "./simple-direct" $ do
       testDirectoryM isDirectCradle "B.hs"
   , biosTestCase "multi-direct" $ runTestEnv "./multi-direct" $ do
       {- tests if both components can be loaded -}
