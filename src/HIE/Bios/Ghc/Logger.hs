@@ -1,4 +1,9 @@
 {-# LANGUAGE BangPatterns, CPP, TypeApplications #-}
+#if __GLASGOW_HASKELL__ >= 1001
+{-# OPTIONS_GHC -Wno-x-internalDebugPprMsgEnvelope #-}
+  -- We don't care about e.g. -ddump-json, so we don't need to go through 'printMessage'.
+  -- Use the internal function to render message to SDoc directly
+#endif
 
 module HIE.Bios.Ghc.Logger (
     withLogger
@@ -96,7 +101,9 @@ ppErrMsg :: DynFlags -> Gap.PprStyle -> MsgEnvelope GhcMessage -> String
 ppErrMsg dflag style err = ppMsg spn SevError dflag style msg -- ++ ext
    where
      spn = errMsgSpan err
-#if __GLASGOW_HASKELL__ >= 905
+#if __GLASGOW_HASKELL__ >= 1001
+     msg = internalDebugPprMsgEnvelope @GhcMessage err
+#elif __GLASGOW_HASKELL__ >= 905
      msg = pprLocMsgEnvelope (defaultDiagnosticOpts @GhcMessage) err
 #else
      msg = pprLocMsgEnvelope err
