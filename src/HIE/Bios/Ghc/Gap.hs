@@ -173,7 +173,7 @@ set_hsc_dflags dflags hsc_env = hsc_env { G.hsc_dflags = dflags }
 overPkgDbRef :: (OsPath -> OsPath) -> G.PackageDBFlag -> G.PackageDBFlag
 overPkgDbRef f (G.PackageDB pkgConfRef) = G.PackageDB $ case pkgConfRef of
     G.PkgDbPath fp ->
-#if __GLASGOW_HASKELL__ >= 915
+#if MIN_VERSION_GLASGOW_HASKELL(9, 14, 1, 20260728)
       G.PkgDbPath (f fp)
 #else
       G.PkgDbPath (unsafeDecodeUtf $ f $ unsafeEncodeUtf fp)
